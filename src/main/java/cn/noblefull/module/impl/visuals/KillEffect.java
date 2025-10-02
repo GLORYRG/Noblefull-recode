@@ -1,0 +1,178 @@
+package cn.noblefull.module.impl.visuals;
+
+import net.minecraft.block.Block;
+import net.minecraft.network.Packet;
+import net.minecraft.network.play.server.S02PacketChat;
+import net.minecraft.network.play.server.S45PacketTitle;
+import cn.noblefull.event.impl.events.packet.PacketReceiveEvent;
+import cn.noblefull.module.Mine;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.effect.EntityLightningBolt;
+import net.minecraft.entity.passive.EntitySquid;
+import net.minecraft.init.Blocks;
+import net.minecraft.util.EnumParticleTypes;
+import net.minecraft.util.ResourceLocation;
+import cn.noblefull.event.annotations.EventTarget;
+import cn.noblefull.event.impl.events.player.AttackEvent;
+import cn.noblefull.event.impl.events.player.MotionEvent;
+import cn.noblefull.module.Category;
+import cn.noblefull.module.Module;
+import cn.noblefull.utils.animations.impl.ContinualAnimation;
+import cn.noblefull.utils.render.SoundUtil;
+import cn.noblefull.value.impl.BoolValue;
+
+import javax.sound.sampled.*;
+import java.io.BufferedInputStream;
+import java.io.IOException;
+import java.util.Objects;
+
+/**
+ * @Author：GLORY
+ * @Date：7/6/2025 3:21 PM
+ */
+public class KillEffect extends Module {
+    public KillEffect() {
+        super("KillEffect",Category.Visuals);
+    }
+    private EntitySquid squid;
+    private double percent = 0.0;
+    private final ContinualAnimation anim = new ContinualAnimation();
+
+    private final BoolValue lightning = new BoolValue("Lightning", true);
+
+    private final BoolValue explosion = new BoolValue("Explosion", true);
+    private final BoolValue squidValue = new BoolValue("Squid", true);
+    private final BoolValue bloodValue = new BoolValue("Blood", true);
+    private final BoolValue soundEffect = new BoolValue("Sound Effect", true);
+
+    private EntityLivingBase target;
+
+    @EventTarget
+    public void onMotion(MotionEvent event) {
+        if (squidValue.getValue()) {
+            if (squid != null) {
+                if (mc.theWorld.loadedEntityList.contains(squid)) {
+                    if (percent < 1) percent += Math.random() * 0.048;
+                    if (percent >= 1) {
+                        percent = 0.0;
+                        for (int i = 0; i <= 8; i++) {
+                            mc.effectRenderer.emitParticleAtEntity(squid, EnumParticleTypes.FLAME);
+                        }
+                        mc.theWorld.removeEntity(squid);
+                        squid = null;
+                        return;
+                    }
+                } else {
+                    percent = 0.0;
+                }
+                double easeInOutCirc = easeInOutCirc(1 - percent);
+                anim.animate((float) easeInOutCirc, 450);
+                squid.setPositionAndUpdate(squid.posX, squid.posY + anim.getOutput() * 0.9, squid.posZ);
+            }
+
+            if (squid != null) {
+                squid.squidPitch = 0F;
+                squid.prevSquidPitch = 0F;
+                squid.squidYaw = 0F;
+                squid.squidRotation = 90F;
+            }
+        }
+        if (this.target != null && !mc.theWorld.loadedEntityList.contains(this.target)) {
+            if (this.lightning.getValue()) {
+                final EntityLightningBolt entityLightningBolt = new EntityLightningBolt(mc.theWorld, target.posX, target.posY, target.posZ);
+                mc.theWorld.addEntityToWorld((int) (-Math.random() * 100000), entityLightningBolt);
+                SoundUtil.playSound("ambient.weather.thunder");
+            }
+            if (target.getHealth() <= 0){
+
+            }
+            if (this.explosion.getValue()) {
+                for (int i = 0; i <= 8; i++) {
+                    mc.effectRenderer.emitParticleAtEntity(target, EnumParticleTypes.FLAME);
+                }
+
+                SoundUtil.playSound("item.fireCharge.use");
+            }
+
+            if (this.squidValue.getValue()) {
+                squid = new EntitySquid(mc.theWorld);
+                mc.theWorld.addEntityToWorld(-8, squid);
+                squid.setPosition(target.posX, target.posY, target.posZ);
+            }
+            if (this.bloodValue.getValue()) {
+                mc.theWorld.spawnParticle(
+                        EnumParticleTypes.BLOCK_CRACK,
+                        target.posX,
+                        target.posY + target.height - 0.75,
+                        target.posZ,
+                        0.0,
+                        0.0,
+                        0.0,
+                        Block.getStateId(Blocks.redstone_block.getDefaultState())
+                );
+            }
+
+            this.target = null;
+        }
+    }
+    @EventTarget
+    public void onPacket(PacketReceiveEvent event) {
+        Packet<?> packet = event.getPacket();
+
+        if (packet instanceof S02PacketChat) {
+            S02PacketChat s02 = (S02PacketChat) event.getPacket();
+            String xd = s02.getChatComponent().getUnformattedText();
+            if (xd.contains("was killed by " + mc.thePlayer.getName())) {
+                if (this.soundEffect.getValue()) {
+                  playSound(1);
+
+                }
+            }
+
+            if (xd.contains("You Died! Want to play again?")) {
+            }
+        }
+
+        if (packet instanceof S45PacketTitle && ((S45PacketTitle) packet).getType().equals(S45PacketTitle.Type.TITLE)) {
+            String unformattedText = ((S45PacketTitle) packet).getMessage().getUnformattedText();
+            if (unformattedText.contains("VICTORY!")) {
+                playSound(1);
+            }
+            if (unformattedText.contains("GAME OVER!") || unformattedText.contains("DEFEAT!") || unformattedText.contains("YOU DIED!")) {
+            }
+        }
+    }
+    public void playSound(float volume) {
+        new Thread(() -> {
+            AudioInputStream as;
+            try {
+                as = AudioSystem.getAudioInputStream(new BufferedInputStream(Objects.requireNonNull(Mine.getMinecraft().getResourceManager()
+                        .getResource(new ResourceLocation("noblefull/sounds/sb.wav"))
+                        .getInputStream())));
+                Clip clip = AudioSystem.getClip();
+                clip.open(as);
+                clip.start();
+                FloatControl gainControl =
+                        (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+                gainControl.setValue(volume);
+                clip.start();
+            } catch (UnsupportedAudioFileException | IOException | LineUnavailableException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+    public double easeInOutCirc(double x) {
+        return x < 0.5 ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2 : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2;
+    }
+
+    @EventTarget
+    public void onAttack(AttackEvent event) {
+        final Entity entity = event.getTargetEntity();
+
+        if (entity instanceof EntityLivingBase) {
+            target = (EntityLivingBase) entity;
+
+        }
+    }
+}
